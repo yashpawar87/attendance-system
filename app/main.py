@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import attendance, camera, people, recognition
+from app.api import attendance, camera, demo, people, recognition
 from app.core.config import get_settings
 from app.services.camera_feed import CameraFrameStore
 
@@ -16,6 +16,7 @@ def create_app() -> FastAPI:
     application.include_router(recognition.router)
     application.include_router(camera.router)
     application.include_router(attendance.router)
+    application.include_router(demo.router)
 
     @application.get("/api/v1/health")
     def health():

@@ -52,11 +52,20 @@ router.get('/camera/metrics', async (req, res) => {
 });
 
 router.get('/demo/video', (req, res) => {
-  const projectRoot = process.env.PROJECT_ROOT || path.resolve(process.cwd(), '..');
-  const videoPath = process.env.DEMO_VIDEO || path.join(projectRoot, 'create_syn_data', 'P1E_S1_C1', 'chokepoint_P1E_S1_C1.mp4');
-  res.sendFile(videoPath, { headers: { 'Cache-Control': 'no-store' } }, (error) => {
-    if (error && !res.headersSent) res.status(error.statusCode || 404).send('Demo video unavailable');
-  });
+  fetch(`${backendBaseUrl()}/api/v1/demo/video`, { headers: backendHeaders() })
+    .then(async (upstream) => {
+      if (!upstream.ok || !upstream.body) {
+        res.status(upstream.status || 502).send(await upstream.text());
+        return;
+      }
+      res.status(200);
+      res.setHeader('Content-Type', upstream.headers.get('content-type') || 'video/mp4');
+      res.setHeader('Cache-Control', 'no-store');
+      const length = upstream.headers.get('content-length');
+      if (length) res.setHeader('Content-Length', length);
+      Readable.fromWeb(upstream.body).pipe(res);
+    })
+    .catch((error) => res.status(502).send(`Demo video unavailable: ${error.message}`));
 });
 
 async function processBrowserFrame(req, res, replayDemo = false) {
