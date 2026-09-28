@@ -4,7 +4,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { getAbsentees, getAttendance, getCameraMetrics, getPeople, getToday } from '../lib/apiClient.js';
 import multer from 'multer';
-import { renderAnalytics, renderAttendance, renderDashboard, renderEmployeeForm, renderPeople, renderSettings } from '../views/dashboard.js';
+import { attendanceTable, renderAnalytics, renderAttendance, renderDashboard, renderEmployeeForm, renderPeople, renderSettings } from '../views/dashboard.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024, files: 20 } });
@@ -48,6 +48,38 @@ router.get('/camera/metrics', async (req, res) => {
     res.status(upstream.status).type('application/json').send(body);
   } catch (error) {
     res.status(502).json({ detail: `Camera metrics unavailable: ${error.message}` });
+  }
+});
+
+router.get('/live/overview', async (req, res) => {
+  try {
+    const [today, absentees, people, allAttendance, cameraStatus] = await Promise.all([
+      getToday(),
+      getAbsentees(),
+      getPeople(),
+      getAttendance(),
+      getCameraMetrics().catch(() => ({ intruder_events: 0 })),
+    ]);
+    const presentToday = new Set(today.map((row) => row.person_id)).size;
+    const totalWeek = new Set(allAttendance.map((row) => `${row.attendance_date || String(row.event_at).slice(0, 10)}-${row.person_id}`)).size;
+    res.json({
+      present_today: presentToday,
+      attendance_rate: people.length ? (presentToday / people.length) * 100 : 0,
+      needs_attention: absentees.length,
+      total_week: totalWeek,
+      intruder_events: Number(cameraStatus.intruder_events || 0),
+    });
+  } catch (error) {
+    res.status(502).json({ detail: `Dashboard metrics unavailable: ${error.message}` });
+  }
+});
+
+router.get('/live/activity', async (req, res) => {
+  try {
+    const [today, people] = await Promise.all([getToday(), getPeople()]);
+    res.json({ html: attendanceTable(today, people, 6), total: today.length });
+  } catch (error) {
+    res.status(502).json({ detail: `Recent activity unavailable: ${error.message}` });
   }
 });
 

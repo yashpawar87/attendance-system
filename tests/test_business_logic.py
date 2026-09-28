@@ -91,3 +91,14 @@ def test_temporal_confirmation_requires_consecutive_matches():
     assert service.identify(frame) is None
     assert service.identify(frame) is None
     assert service.identify(frame) is not None
+
+
+def test_demo_replay_returns_match_without_temporal_confirmation():
+    settings = Settings(temporal_match_count=3, temporal_window_seconds=1)
+    pipeline = RecognitionPipeline(FakeDetector(), FakeLiveness(), FakeEmbedder(), settings)
+    service = RecognitionService(pipeline, lambda: FakeMatcher(), settings)
+    frame = np.zeros((120, 120, 3), dtype=np.uint8)
+    result, observations = service.identify_with_observations(frame, source_id="demo", demo_replay=True)
+    assert result is not None
+    assert result.person_id == 7
+    assert observations[0].matched is True

@@ -43,10 +43,11 @@ class RecognitionService:
         result = None
         if accepted:
             selected = max(accepted, key=lambda observation: observation.similarity or -1)
-            result = self._confirm(
-                RecognitionResult(selected.person_id, selected.similarity or 0.0, selected.liveness),
-                source_id,
-            )
+            candidate = RecognitionResult(selected.person_id, selected.similarity or 0.0, selected.liveness)
+            # A replay is an explicit, operator-triggered demo. Its frames are
+            # already coming from a known video, so do not make the demo wait
+            # for the normal live-camera temporal confirmation window.
+            result = candidate if demo_replay else self._confirm(candidate, source_id)
         else:
             with self._state.lock:
                 self._state.recent.pop(source_id, None)

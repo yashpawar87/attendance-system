@@ -94,7 +94,7 @@ python door/main.py \
   --sample-fps 5
 ```
 
-Open `http://localhost:3000` for the dashboard—not port `8000`, which is the backend API. The camera panel receives the replayed frames and refreshes every five seconds.
+Open `http://localhost:3000` for the dashboard—not port `8000`, which is the backend API. The dashboard counters and Recent activity panel refresh every two seconds while the page is open.
 
 Select **Employee database** at the top of the dashboard to view employee IDs, names, email addresses, active status, enrolled sample counts, and representative enrollment photos. After applying the migration, populate photos for the existing ChokePoint enrollment with:
 
