@@ -20,6 +20,31 @@ Put the YuNet, SFace, and MiniFASNetV2 ONNX weights in `app/vision/models/` befo
 
 Run the dashboard from its directory with `npm install`, `BACKEND_URL=http://localhost:8000 API_TOKEN=change-me CAMERA_SOURCE_ID=door-camera LOCAL_CONTROL_ENABLED=true npm start`. The dashboard can use the browser camera directly, or receive frames from the on-premise camera client.
 
+## Firebase dashboard authentication
+
+The dashboard supports Google/Gmail sign-in and email/password accounts through Firebase Authentication. Firebase authentication is server-enforced: after the browser signs in, the dashboard server verifies the Firebase ID token with the Firebase Admin SDK and creates an HTTP-only session cookie.
+
+In the Firebase console:
+
+1. Create or select a Firebase project and add a Web app.
+2. In Authentication → Sign-in method, enable **Google** and **Email/Password**.
+3. Add the local dashboard host and the Railway dashboard domain under Authentication → Settings → Authorized domains.
+4. In Project settings → Service accounts, generate a new private key. Keep the JSON file private and copy its `project_id`, `client_email`, and `private_key` into the server variables below.
+
+Local dashboard variables:
+
+```env
+FIREBASE_AUTH_ENABLED=true
+FIREBASE_API_KEY=<Firebase web app apiKey>
+FIREBASE_AUTH_DOMAIN=<Firebase web app authDomain>
+FIREBASE_PROJECT_ID=<Firebase project_id>
+FIREBASE_APP_ID=<Firebase web app appId>
+FIREBASE_CLIENT_EMAIL=<service account client_email>
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n"
+```
+
+The private key must remain a secret and must never be committed. On Railway, place these variables on the **Dashboard** service. `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`, and `FIREBASE_APP_ID` are web configuration values; the client email and private key are server credentials.
+
 All protected endpoints use `Authorization: Bearer $API_TOKEN`. Configure thresholds and the local attendance timezone through environment variables. Attendance timestamps are stored in UTC while `attendance_date` is derived in `ATTENDANCE_TIMEZONE`, and duplicate check-ins are guarded by a database uniqueness constraint.
 
 Uploaded frames are decoded and processed in memory only; they are never written to disk or logs. Face embeddings remain while an employee is enrolled and can be removed with the authenticated `DELETE /api/v1/people/{id}/embeddings` endpoint. Administrative actions emit audit log records containing the action, target, and actor, never biometric payloads.
