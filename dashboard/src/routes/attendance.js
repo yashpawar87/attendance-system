@@ -38,6 +38,86 @@ router.get('/camera/feed', async (req, res) => {
   Readable.fromWeb(upstream.body).pipe(res);
 });
 
+router.get('/camera/metrics', async (req, res) => {
+  const sourceId = String(req.query.source || process.env.CAMERA_SOURCE_ID || 'door-camera');
+  try {
+    const upstream = await fetch(`${backendBaseUrl()}/api/v1/camera/status?source_id=${encodeURIComponent(sourceId)}`, {
+      headers: backendHeaders(),
+    });
+    const body = await upstream.text();
+    res.status(upstream.status).type('application/json').send(body);
+  } catch (error) {
+    res.status(502).json({ detail: `Camera metrics unavailable: ${error.message}` });
+  }
+});
+
+router.get('/demo/video', (req, res) => {
+  const projectRoot = process.env.PROJECT_ROOT || path.resolve(process.cwd(), '..');
+  const videoPath = process.env.DEMO_VIDEO || path.join(projectRoot, 'create_syn_data', 'P1E_S1_C1', 'chokepoint_P1E_S1_C1.mp4');
+  res.sendFile(videoPath, { headers: { 'Cache-Control': 'no-store' } }, (error) => {
+    if (error && !res.headersSent) res.status(error.statusCode || 404).send('Demo video unavailable');
+  });
+});
+
+async function processBrowserFrame(req, res, replayDemo = false) {
+  const file = req.file;
+  if (!file) {
+    res.status(400).json({ detail: 'A camera frame is required.' });
+    return;
+  }
+  const sourceId = String(req.body.source_id || process.env.CAMERA_SOURCE_ID || 'door-camera');
+  const recognitionForm = new FormData();
+  recognitionForm.append('image', new Blob([file.buffer], { type: file.mimetype || 'image/jpeg' }), file.originalname || 'browser-frame.jpg');
+  recognitionForm.append('source_id', sourceId);
+  const recognitionPath = replayDemo ? '/api/v1/recognition/demo-identify' : '/api/v1/recognition/identify';
+  const recognitionResponse = await fetch(`${backendBaseUrl()}${recognitionPath}`, {
+    method: 'POST',
+    headers: backendHeaders(),
+    body: recognitionForm,
+  });
+  const recognitionText = await recognitionResponse.text();
+  if (!recognitionResponse.ok) {
+    res.status(recognitionResponse.status).type('application/json').send(recognitionText);
+    return;
+  }
+  const result = JSON.parse(recognitionText);
+  let attendance = null;
+  if (result.matched) {
+    const attendanceResponse = await fetch(`${backendBaseUrl()}/api/v1/attendance/${replayDemo ? 'demo-mark' : 'mark'}`, {
+      method: 'POST',
+      headers: { ...backendHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        person_id: result.person_id,
+        similarity: result.similarity,
+        liveness_score: result.liveness,
+      }),
+    });
+    const attendanceText = await attendanceResponse.text();
+    if (!attendanceResponse.ok) {
+      res.status(attendanceResponse.status).type('application/json').send(attendanceText);
+      return;
+    }
+    attendance = JSON.parse(attendanceText);
+  }
+  res.json({ ...result, attendance_marked: Boolean(attendance?.marked), attendance });
+}
+
+router.post('/browser/identify', upload.single('image'), async (req, res) => {
+  try {
+    await processBrowserFrame(req, res);
+  } catch (error) {
+    res.status(502).json({ detail: `Browser recognition unavailable: ${error.message}` });
+  }
+});
+
+router.post('/browser/demo-identify', upload.single('image'), async (req, res) => {
+  try {
+    await processBrowserFrame(req, res, true);
+  } catch (error) {
+    res.status(502).json({ detail: `Browser demo unavailable: ${error.message}` });
+  }
+});
+
 router.get('/people/:personId/photo', async (req, res) => {
   const backendUrl = (process.env.BACKEND_URL || 'http://localhost:8000').replace(/\/$/, '');
   const token = process.env.API_TOKEN || '';

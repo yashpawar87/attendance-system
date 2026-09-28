@@ -18,7 +18,7 @@ uvicorn app.main:app --reload
 
 Put the YuNet, SFace, and MiniFASNetV2 ONNX weights in `app/vision/models/` before using recognition or enrollment. The backend returns a clear `503` when weights are absent; it never substitutes a different inference runtime or model.
 
-Run the dashboard from its directory with `npm install`, `BACKEND_URL=http://localhost:8000 API_TOKEN=change-me CAMERA_SOURCE_ID=door-camera LOCAL_CONTROL_ENABLED=true npm start`. The dashboard’s live camera panel is fed by the authenticated backend relay; the camera client must be running and sending frames for it to show video.
+Run the dashboard from its directory with `npm install`, `BACKEND_URL=http://localhost:8000 API_TOKEN=change-me CAMERA_SOURCE_ID=door-camera LOCAL_CONTROL_ENABLED=true npm start`. The dashboard can use the browser camera directly, or receive frames from the on-premise camera client.
 
 All protected endpoints use `Authorization: Bearer $API_TOKEN`. Configure thresholds and the local attendance timezone through environment variables. Attendance timestamps are stored in UTC while `attendance_date` is derived in `ATTENDANCE_TIMEZONE`, and duplicate check-ins are guarded by a database uniqueness constraint.
 
@@ -78,7 +78,7 @@ alembic upgrade head
 python populate_profile_photos.py
 ```
 
-The themed dashboard also provides an **Add employee** form. It creates the employee, uploads an optional profile photo, and enrolls one or more face images through the existing protected people API. The live camera panel overlays green boxes for recognized employees and red boxes for unknown faces, and the Overview page counts distinct unknown-person appearances as **Intruders detected**. The counter is in-memory and resets when the backend restarts. On the Overview page, **Open camera** starts the local physical-camera client, while **Run video demo** starts the configured ChokePoint replay through the dashboard; set `DEMO_REPLAY_ENABLED=true` before starting the backend for the client-demo action. The physical camera requires macOS camera permission for the terminal/application running the dashboard.
+The themed dashboard also provides an **Add employee** form. It creates the employee, uploads an optional profile photo, and enrolls one or more face images through the existing protected people API. The live camera panel overlays green boxes for recognized employees and red boxes for unknown faces, and the Overview page counts distinct unknown-person appearances as **Intruders detected**. The counter is in-memory and resets when the backend restarts. On the Overview page, **Open camera** requests camera permission from the browser and sends frames securely through the dashboard to the backend. **Run video demo** plays the bundled ChokePoint MP4 in the browser and sends its frames through the explicit replay-demo endpoint. Set `DEMO_REPLAY_ENABLED=true` before starting the backend for the browser demo. Browser camera access requires HTTPS or `localhost`; Railway provides HTTPS automatically.
 
 For a client presentation where the MP4 also creates visibly labeled demo rows, add `DEMO_REPLAY_ENABLED=true` to `.env`, restart the backend, and run:
 
@@ -127,4 +127,4 @@ CAMERA_SOURCE_ID=door-camera
 LOCAL_CONTROL_ENABLED=false
 ```
 
-The physical-camera and local MP4 controls are intentionally disabled on the hosted dashboard because Railway cannot access the laptop camera or local video path. Run the `door` client on the on-premise machine and keep `LOCAL_CONTROL_ENABLED=true` only for the local dashboard presentation.
+The browser camera and browser MP4 demo work on the hosted dashboard. `LOCAL_CONTROL_ENABLED` only controls the optional legacy buttons that launch a Python `door` process on the same machine as the dashboard; keep it `false` on Railway. For a separate physical camera device, run the `door` client on that device and point it at the Railway backend.
