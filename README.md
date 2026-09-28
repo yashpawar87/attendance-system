@@ -67,6 +67,8 @@ python enroll_chokepoint.py \
 
 Use `--dry-run` first to run YuNet/SFace and write the manifest without database inserts. If you intentionally need to regenerate an existing employee’s embeddings, add `--replace`; otherwise rerunning fails rather than silently duplicating data. The manifest records the selected frames and mapping for later comparison against XML labels during video accuracy evaluation; those labels are never passed into recognition.
 
+If the extracted JPEG frames are not present (for example, in a Railway deployment where they are omitted by `.gitignore`), the enrollment script automatically reads the corresponding frames from the tracked ChokePoint MP4 and caches only the selected enrollment frames.
+
 ## Demonstrate with the ChokePoint video
 
 After enrollment, run the backend and dashboard in separate terminals, then replay the MP4 as if it were the door camera:

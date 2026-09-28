@@ -3,8 +3,10 @@
 
 The XML is used only as ground-truth metadata: it tells this script which
 frames belong to which synthetic subject. The XML eye coordinates are never
-passed to the recognition pipeline. Every selected JPEG is independently
-detected by YuNet and embedded by SFace.
+passed to the recognition pipeline. Every selected frame is independently
+detected by YuNet and embedded by SFace. If an extracted JPEG is unavailable,
+the frame is read from the first MP4 in the dataset directory and cached as
+that frame's JPEG.
 
 Example:
     python enroll_chokepoint.py \
@@ -115,6 +117,33 @@ def frame_path(dataset_dir: Path, frame_number: int) -> Path:
     return unpadded
 
 
+def video_path(dataset_dir: Path) -> Path | None:
+    videos = sorted(dataset_dir.glob("*.mp4")) + sorted(dataset_dir.glob("*.MP4"))
+    return videos[0] if videos else None
+
+
+def load_frame(
+    image_path: Path,
+    frame_number: int,
+    video_capture: cv2.VideoCapture | None,
+    video_frame_number: int | None = None,
+) -> np.ndarray | None:
+    if image_path.exists():
+        return cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+    if video_capture is None:
+        return None
+    video_capture.set(cv2.CAP_PROP_POS_FRAMES, video_frame_number if video_frame_number is not None else frame_number)
+    ok, image = video_capture.read()
+    if not ok or image is None:
+        return None
+    # Cache only selected frames. The extracted JPEGs are ignored by Git,
+    # keeping deployments small while preserving the existing manifest paths.
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    if not cv2.imwrite(str(image_path), image):
+        raise RuntimeError(f"Could not cache video frame: {image_path}")
+    return image
+
+
 def spread_order(frame_numbers: tuple[int, ...], count: int) -> list[int]:
     """Return candidates nearest evenly spaced points across the appearance."""
     if not frame_numbers:
@@ -152,7 +181,12 @@ def detect_one(detector, image: np.ndarray, annotation: FrameAnnotation | None =
                 scored.append((min(float(same_order), float(swapped_order)), face))
             distance, best = min(scored, key=lambda item: item[0])
             max_distance = max(20.0, 0.75 * float(np.sqrt(best.box[2] * best.box[3])))
-            return best if distance <= max_distance else None
+            if distance <= max_distance:
+                return best
+            # Video decoding can slightly shift landmark coordinates compared
+            # with the extracted JPEG/XML pair. If YuNet found exactly one
+            # face, there is no identity ambiguity, so use that detection.
+            return faces[0] if len(faces) == 1 else None
         if len(faces) != 1:
             return None
         return faces[0]
@@ -166,42 +200,50 @@ def select_frames(
     *,
     count: int,
     min_face_area_ratio: float,
+    source_video: Path | None = None,
+    video_frame_indices: dict[int, int] | None = None,
 ) -> tuple[list[SelectedFrame], dict[str, list[str]]]:
     selected: list[SelectedFrame] = []
     rejected: dict[str, list[str]] = {}
-    for subject in subjects:
-        accepted_for_subject: list[SelectedFrame] = []
-        rejected_for_subject: list[str] = []
-        annotations_by_frame = {annotation.frame_number: annotation for annotation in subject.annotations}
-        for frame_number in spread_order(subject.frame_numbers, count):
-            image_path = frame_path(dataset_dir, frame_number)
-            if not image_path.exists():
-                rejected_for_subject.append(f"{frame_number}:missing_image")
-                continue
-            image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-            if image is None:
-                rejected_for_subject.append(f"{frame_number}:decode_failed")
-                continue
-            annotation = annotations_by_frame[frame_number]
-            face = detect_one(detector, image, annotation)
-            if face is None:
-                rejected_for_subject.append(f"{frame_number}:no_yunet_face_associated_to_annotation")
-                continue
-            _, _, width, height = face.box
-            area_ratio = float(width * height) / float(image.shape[0] * image.shape[1])
-            if area_ratio < min_face_area_ratio:
-                rejected_for_subject.append(f"{frame_number}:face_too_small")
-                continue
-            accepted_for_subject.append(SelectedFrame(subject.subject_id, frame_number, image_path, face.confidence, area_ratio, annotation))
-            if len(accepted_for_subject) == count:
-                break
-        selected.extend(accepted_for_subject)
-        rejected[subject.subject_id] = rejected_for_subject
-        if len(accepted_for_subject) < count:
-            raise RuntimeError(
-                f"Subject {subject.subject_id} has only {len(accepted_for_subject)} usable frames; "
-                f"requested {count}. Rejected: {', '.join(rejected_for_subject[:8])}"
-            )
+    capture = cv2.VideoCapture(str(source_video)) if source_video is not None else None
+    try:
+        if capture is not None and not capture.isOpened():
+            capture.release()
+            capture = None
+        for subject in subjects:
+            accepted_for_subject: list[SelectedFrame] = []
+            rejected_for_subject: list[str] = []
+            annotations_by_frame = {annotation.frame_number: annotation for annotation in subject.annotations}
+            for frame_number in spread_order(subject.frame_numbers, count):
+                image_path = frame_path(dataset_dir, frame_number)
+                image = load_frame(image_path, frame_number, capture, (video_frame_indices or {}).get(frame_number))
+                if image is None:
+                    reason = "missing_image" if source_video is None else "missing_image_and_video_frame"
+                    rejected_for_subject.append(f"{frame_number}:{reason}")
+                    continue
+                annotation = annotations_by_frame[frame_number]
+                face = detect_one(detector, image, annotation)
+                if face is None:
+                    rejected_for_subject.append(f"{frame_number}:no_yunet_face_associated_to_annotation")
+                    continue
+                _, _, width, height = face.box
+                area_ratio = float(width * height) / float(image.shape[0] * image.shape[1])
+                if area_ratio < min_face_area_ratio:
+                    rejected_for_subject.append(f"{frame_number}:face_too_small")
+                    continue
+                accepted_for_subject.append(SelectedFrame(subject.subject_id, frame_number, image_path, face.confidence, area_ratio, annotation))
+                if len(accepted_for_subject) == count:
+                    break
+            selected.extend(accepted_for_subject)
+            rejected[subject.subject_id] = rejected_for_subject
+            if len(accepted_for_subject) < count:
+                raise RuntimeError(
+                    f"Subject {subject.subject_id} has only {len(accepted_for_subject)} usable frames; "
+                    f"requested {count}. Rejected: {', '.join(rejected_for_subject[:8])}"
+                )
+    finally:
+        if capture is not None:
+            capture.release()
     return selected, rejected
 
 
@@ -337,6 +379,13 @@ def main() -> int:
     mapping = load_subject_mapping(args.mapping_file, subjects, args.employee_prefix)
     print(f"Found {len(subjects)} subjects in {args.xml}")
     print("Mapping: " + ", ".join(f"{subject}->{employee}" for subject, employee in mapping.items()))
+    source_video = video_path(args.dataset_dir)
+    video_frame_indices = {
+        int(frame.attrib["number"]): index
+        for index, frame in enumerate(ET.parse(args.xml).getroot().findall("frame"))
+    }
+    if source_video is not None:
+        print(f"Frame source fallback: {source_video}")
 
     detector = YuNetFaceDetector(model_paths["detection"])
     embedder = SFaceEmbedder(model_paths["embedding"])
@@ -346,6 +395,8 @@ def main() -> int:
         detector,
         count=args.count,
         min_face_area_ratio=args.min_face_area_ratio,
+        source_video=source_video,
+        video_frame_indices=video_frame_indices,
     )
     embeddings = build_embeddings(selected, detector, embedder)
 
