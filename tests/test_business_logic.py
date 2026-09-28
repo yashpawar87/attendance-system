@@ -11,7 +11,7 @@ from app.db.repositories import find_best_matches, insert_attendance
 from app.services.attendance_service import AttendanceService
 from app.services.recognition_service import RecognitionService
 from app.vision.interfaces import DetectedFace, MatchCandidate
-from app.vision.pipeline import RecognitionPipeline
+from app.vision.pipeline import FaceObservation, RecognitionPipeline
 
 
 def make_db():
@@ -102,3 +102,14 @@ def test_demo_replay_returns_match_without_temporal_confirmation():
     assert result is not None
     assert result.person_id == 7
     assert observations[0].matched is True
+
+
+def test_pipeline_deduplicates_overlapping_observations_for_one_person():
+    observations = [
+        FaceObservation((10, 10, 100, 100), .90, 7, .91, .95, True),
+        FaceObservation((12, 12, 98, 98), .80, 7, .88, .95, True),
+        FaceObservation((220, 10, 100, 100), .85, 8, .90, .95, True),
+    ]
+    unique = RecognitionPipeline._deduplicate_observations(observations)
+    assert [observation.person_id for observation in unique] == [7, 8]
+    assert unique[0].similarity == .91

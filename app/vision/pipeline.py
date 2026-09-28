@@ -79,4 +79,41 @@ class RecognitionPipeline:
                     matched,
                 )
             )
-        return observations
+        return self._deduplicate_observations(observations)
+
+    @staticmethod
+    def _intersection_over_union(first: tuple[float, float, float, float], second: tuple[float, float, float, float]) -> float:
+        first_x, first_y, first_width, first_height = first
+        second_x, second_y, second_width, second_height = second
+        first_right, first_bottom = first_x + first_width, first_y + first_height
+        second_right, second_bottom = second_x + second_width, second_y + second_height
+        intersection_width = max(0.0, min(first_right, second_right) - max(first_x, second_x))
+        intersection_height = max(0.0, min(first_bottom, second_bottom) - max(first_y, second_y))
+        intersection = intersection_width * intersection_height
+        first_area = max(0.0, first_width) * max(0.0, first_height)
+        second_area = max(0.0, second_width) * max(0.0, second_height)
+        union = first_area + second_area - intersection
+        return intersection / union if union else 0.0
+
+    @classmethod
+    def _deduplicate_observations(cls, observations: list[FaceObservation]) -> list[FaceObservation]:
+        """Collapse overlapping boxes for the same recognized face in a frame."""
+        unique: list[FaceObservation] = []
+        for observation in observations:
+            duplicate_index = None
+            for index, existing in enumerate(unique):
+                same_person = observation.person_id is not None and observation.person_id == existing.person_id
+                both_unknown = observation.person_id is None and existing.person_id is None
+                overlap_threshold = 0.35 if same_person else 0.50
+                if (same_person or both_unknown) and cls._intersection_over_union(observation.box, existing.box) >= overlap_threshold:
+                    duplicate_index = index
+                    break
+            if duplicate_index is None:
+                unique.append(observation)
+                continue
+            existing = unique[duplicate_index]
+            observation_quality = (observation.matched, observation.similarity or -1.0, observation.detector_confidence)
+            existing_quality = (existing.matched, existing.similarity or -1.0, existing.detector_confidence)
+            if observation_quality > existing_quality:
+                unique[duplicate_index] = observation
+        return unique
