@@ -47,6 +47,8 @@ async def enroll_person(
         content = await upload.read()
         if not content or len(content) > 8 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="Invalid or oversized image")
+        if not (content.startswith(b'\xff\xd8\xff') or content.startswith(b'\x89PNG\r\n\x1a\n')):
+            raise HTTPException(status_code=400, detail="Invalid file type. Only JPEG and PNG are allowed.")
         image = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
         if image is None:
             raise HTTPException(status_code=400, detail="Could not decode image")

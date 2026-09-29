@@ -53,6 +53,9 @@ def delete_embeddings(db: Session, person_id: int) -> int:
     return int(result.rowcount or 0)
 
 
+from sqlalchemy.exc import OperationalError, ProgrammingError
+
+
 def find_best_matches(db: Session, embedding: list[float], limit: int = 2) -> list[tuple[int, float]]:
     """Use pgvector cosine distance in production and a deterministic Python fallback in SQLite tests."""
     try:
@@ -66,7 +69,7 @@ def find_best_matches(db: Session, embedding: list[float], limit: int = 2) -> li
             {"embedding": vector_literal, "limit": limit},
         ).all()
         return [(int(row[0]), float(row[1])) for row in rows]
-    except Exception:
+    except (OperationalError, ProgrammingError):
         db.rollback()
         query = select(FaceEmbedding.person_id, FaceEmbedding.embedding).join(Person).where(Person.active.is_(True))
         scores: dict[int, float] = {}

@@ -28,7 +28,7 @@ class EnrollmentService:
                 if face is None:
                     raise ValueError("Each enrollment image must contain one clear face")
             x, y, width, height = face.box
-            if width < 40 or height < 40 or width * height < image.shape[0] * image.shape[1] * 0.01:
+            if width < 40 or height < 40 or width * height < image.shape[0] * image.shape[1] * 0.05:
                 raise ValueError("Enrollment face is too small")
             face = type(face)(face.box, face.landmarks, face.confidence, image)
             embedding = self.embedder.embed(face)

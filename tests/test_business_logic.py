@@ -84,7 +84,7 @@ def test_pipeline_enforces_liveness_threshold_and_similarity_gap():
 
 
 def test_temporal_confirmation_requires_consecutive_matches():
-    settings = Settings(temporal_match_count=3, temporal_window_seconds=1)
+    settings = Settings(temporal_match_count=3, demo_temporal_match_count=3, temporal_window_seconds=1)
     pipeline = RecognitionPipeline(FakeDetector(), FakeLiveness(), FakeEmbedder(), settings)
     service = RecognitionService(pipeline, lambda: FakeMatcher(), settings)
     frame = np.zeros((120, 120, 3), dtype=np.uint8)
@@ -93,15 +93,56 @@ def test_temporal_confirmation_requires_consecutive_matches():
     assert service.identify(frame) is not None
 
 
-def test_demo_replay_returns_match_without_temporal_confirmation():
-    settings = Settings(temporal_match_count=3, temporal_window_seconds=1)
+def test_demo_replay_requires_consecutive_confirmation():
+    settings = Settings(temporal_match_count=3, demo_temporal_match_count=3, temporal_window_seconds=1)
     pipeline = RecognitionPipeline(FakeDetector(), FakeLiveness(), FakeEmbedder(), settings)
     service = RecognitionService(pipeline, lambda: FakeMatcher(), settings)
     frame = np.zeros((120, 120, 3), dtype=np.uint8)
-    result, observations = service.identify_with_observations(frame, source_id="demo", demo_replay=True)
+    first, observations = service.identify_with_observations(frame, source_id="demo", demo_replay=True)
+    second, _ = service.identify_with_observations(frame, source_id="demo", demo_replay=True)
+    result, _ = service.identify_with_observations(frame, source_id="demo", demo_replay=True)
+    assert first is None
+    assert second is None
     assert result is not None
     assert result.person_id == 7
     assert observations[0].matched is True
+
+
+def test_demo_replay_does_not_switch_a_confirmed_face_to_another_employee():
+    class SwitchingMatcher:
+        def __init__(self):
+            self.calls = 0
+
+        def match(self, embedding):
+            self.calls += 1
+            person_id = 7 if self.calls == 1 else 8
+            return MatchCandidate(person_id, .91), MatchCandidate(9, .2)
+
+    settings = Settings(demo_temporal_match_count=1)
+    pipeline = RecognitionPipeline(FakeDetector(), FakeLiveness(), FakeEmbedder(), settings)
+    matcher = SwitchingMatcher()
+    service = RecognitionService(pipeline, lambda: matcher, settings)
+    frame = np.zeros((120, 120, 3), dtype=np.uint8)
+    first, _ = service.identify_with_observations(frame, source_id="locked-demo", demo_replay=True)
+    second, _ = service.identify_with_observations(frame, source_id="locked-demo", demo_replay=True)
+    assert first is not None and first.person_id == 7
+    assert second is None
+
+
+def test_demo_replay_confirms_multiple_faces_independently():
+    class MultiFacePipeline:
+        def inspect(self, image, matcher, *, enforce_liveness=True, enforce_gap=True, similarity_gap_threshold=None):
+            return [
+                FaceObservation((0, 0, 40, 40), .99, 7, .92, .95, True),
+                FaceObservation((100, 0, 40, 40), .99, 8, .91, .95, True),
+            ]
+
+    settings = Settings(demo_temporal_match_count=1)
+    service = RecognitionService(MultiFacePipeline(), lambda: FakeMatcher(), settings)
+    frame = np.zeros((120, 160, 3), dtype=np.uint8)
+    matches, observations = service.identify_many_with_observations(frame, source_id="multi-face-demo", demo_replay=True)
+    assert {match.person_id for match in matches} == {7, 8}
+    assert len(observations) == 2
 
 
 def test_pipeline_deduplicates_overlapping_observations_for_one_person():

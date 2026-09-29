@@ -100,15 +100,20 @@ async function processDemoFrame(req, res) {
     return;
   }
   const result = JSON.parse(recognitionText);
-  let attendance = null;
-  if (result.matched) {
+  const matches = Array.isArray(result.matches) && result.matches.length
+    ? result.matches
+    : result.matched
+      ? [{ person_id: result.person_id, similarity: result.similarity, liveness: result.liveness }]
+      : [];
+  const attendances = [];
+  for (const match of matches) {
     const attendanceResponse = await fetch(`${backendBaseUrl()}/api/v1/attendance/demo-mark`, {
       method: 'POST',
       headers: { ...backendHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        person_id: result.person_id,
-        similarity: result.similarity,
-        liveness_score: result.liveness,
+        person_id: match.person_id,
+        similarity: match.similarity,
+        liveness_score: match.liveness,
       }),
     });
     const attendanceText = await attendanceResponse.text();
@@ -116,9 +121,14 @@ async function processDemoFrame(req, res) {
       res.status(attendanceResponse.status).type('application/json').send(attendanceText);
       return;
     }
-    attendance = JSON.parse(attendanceText);
+    attendances.push(JSON.parse(attendanceText));
   }
-  res.json({ ...result, attendance_marked: Boolean(attendance?.marked), attendance });
+  res.json({
+    ...result,
+    attendance_marked: attendances.some((item) => item.marked),
+    attendance: attendances[0] || null,
+    attendances,
+  });
 }
 
 router.post('/browser/demo-identify', upload.single('image'), async (req, res) => {

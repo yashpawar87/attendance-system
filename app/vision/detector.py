@@ -16,6 +16,9 @@ class YuNetFaceDetector(FaceDetector):
         confidence_threshold: float = 0.70,
         nms_threshold: float = 0.30,
         top_k: int = 5000,
+        scale_factor: float = 1.0,
+        swap_rb: bool = False,
+        mean: tuple[float, float, float] = (0.0, 0.0, 0.0),
     ):
         options = ort.SessionOptions()
         # Some older exports list initializers as graph inputs. This is a
@@ -29,6 +32,9 @@ class YuNetFaceDetector(FaceDetector):
         self.confidence_threshold = confidence_threshold
         self.nms_threshold = nms_threshold
         self.top_k = top_k
+        self.scale_factor = scale_factor
+        self.swap_rb = swap_rb
+        self.mean = mean
         self.strides = (8, 16, 32)
 
     def detect(self, image: np.ndarray) -> DetectedFace | None:
@@ -40,9 +46,9 @@ class YuNetFaceDetector(FaceDetector):
             return []
         original_height, original_width = image.shape[:2]
         resized = cv2.resize(image, (self.input_width, self.input_height), interpolation=cv2.INTER_LINEAR)
-        # This YuNet export expects raw uint8-range BGR input. Normalizing or
-        # swapping channels collapses its objectness scores.
-        blob = cv2.dnn.blobFromImage(resized, scalefactor=1.0, size=(self.input_width, self.input_height), swapRB=False)
+        # This YuNet export typically expects raw uint8-range BGR input.
+        # It's now configurable in case a different export expects normalization.
+        blob = cv2.dnn.blobFromImage(resized, scalefactor=self.scale_factor, size=(self.input_width, self.input_height), mean=self.mean, swapRB=self.swap_rb)
         outputs = self.session.run(None, {self.input_name: blob.astype(np.float32)})
         candidates = self._decode_multi_output(outputs, original_width, original_height)
         return candidates if candidates else self._decode_flat_output(outputs, original_width, original_height)

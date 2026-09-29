@@ -1,3 +1,4 @@
+import threading
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
@@ -12,19 +13,28 @@ class Base(DeclarativeBase):
 
 _engine = None
 _session_factory = None
+_db_lock = threading.Lock()
+
+
+def setup_db(settings=None):
+    global _engine, _session_factory
+    if settings is None:
+        settings = get_settings()
+    with _db_lock:
+        if _engine is None:
+            _engine = create_engine(settings.database_url, pool_pre_ping=True)
+            _session_factory = sessionmaker(bind=_engine, autoflush=False, expire_on_commit=False)
 
 
 def get_engine():
-    global _engine
     if _engine is None:
-        _engine = create_engine(get_settings().database_url, pool_pre_ping=True)
+        setup_db()
     return _engine
 
 
 def get_db() -> Generator[Session, None, None]:
-    global _session_factory
     if _session_factory is None:
-        _session_factory = sessionmaker(bind=get_engine(), autoflush=False, expire_on_commit=False)
+        setup_db()
     db = _session_factory()
     try:
         yield db

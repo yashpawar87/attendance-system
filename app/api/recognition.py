@@ -8,8 +8,8 @@ from app.vision.overlay import draw_face_overlays
 router = APIRouter(prefix="/api/v1/recognition", tags=["recognition"], dependencies=[Depends(require_api_token)])
 
 
-def _identify_response(result, observations):
-    from app.api.schemas import FaceDetectionResponse
+def _identify_response(result, observations, matches):
+    from app.api.schemas import FaceDetectionResponse, RecognitionMatchResponse
 
     detections = [FaceDetectionResponse(
         box=tuple(float(value) for value in observation.box),
@@ -17,14 +17,16 @@ def _identify_response(result, observations):
         person_id=observation.person_id,
         similarity=observation.similarity,
     ) for observation in observations]
+    match_rows = [RecognitionMatchResponse(person_id=item.person_id, similarity=item.similarity, liveness=item.liveness) for item in matches]
     if result is None:
-        return IdentifyResponse(matched=False, detections=detections)
+        return IdentifyResponse(matched=False, detections=detections, matches=match_rows)
     return IdentifyResponse(
         matched=True,
         person_id=result.person_id,
         similarity=result.similarity,
         liveness=result.liveness,
         detections=detections,
+        matches=match_rows,
     )
 
 
@@ -47,7 +49,8 @@ async def identify(
     service=Depends(get_recognition_service),
 ):
     frame = await _decode_upload(image)
-    result, observations = service.identify_with_observations(frame, source_id=source_id)
+    matches, observations = service.identify_many_with_observations(frame, source_id=source_id)
+    result = max(matches, key=lambda item: item.similarity) if matches else None
     request.app.state.camera_store.record_intruders(source_id, sum(1 for observation in observations if not observation.matched))
     import cv2
     import numpy as np
@@ -55,7 +58,7 @@ async def identify(
     encoded_ok, encoded = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
     if encoded_ok:
         request.app.state.camera_store.publish(source_id, encoded.tobytes())
-    return _identify_response(result, observations)
+    return _identify_response(result, observations, matches)
 
 
 @router.post("/demo-identify", response_model=IdentifyResponse)
@@ -68,11 +71,12 @@ async def demo_identify(
     if not request.app.state.settings.demo_replay_enabled:
         raise HTTPException(status_code=403, detail="Replay demo mode is disabled")
     frame = await _decode_upload(image)
-    result, observations = service.identify_with_observations(frame, source_id=source_id, demo_replay=True)
+    matches, observations = service.identify_many_with_observations(frame, source_id=source_id, demo_replay=True)
+    result = max(matches, key=lambda item: item.similarity) if matches else None
     request.app.state.camera_store.record_intruders(source_id, sum(1 for observation in observations if not observation.matched))
     import cv2
     annotated = draw_face_overlays(frame, observations)
     encoded_ok, encoded = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
     if encoded_ok:
         request.app.state.camera_store.publish(source_id, encoded.tobytes())
-    return _identify_response(result, observations)
+    return _identify_response(result, observations, matches)

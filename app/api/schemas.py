@@ -27,12 +27,19 @@ class FaceDetectionResponse(BaseModel):
     similarity: float | None = None
 
 
+class RecognitionMatchResponse(BaseModel):
+    person_id: int
+    similarity: float
+    liveness: float
+
+
 class IdentifyResponse(BaseModel):
     matched: bool
     person_id: int | None = None
     similarity: float | None = None
     liveness: float | None = None
     detections: list[FaceDetectionResponse] = Field(default_factory=list)
+    matches: list[RecognitionMatchResponse] = Field(default_factory=list)
 
 
 class AttendanceMarkRequest(BaseModel):

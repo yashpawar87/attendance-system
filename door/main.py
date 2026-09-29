@@ -30,11 +30,12 @@ def main() -> None:
         for image in source:
             frames_seen += 1
             result = client.identify(image, replay_demo=args.demo_replay)
-            if result.get('matched'):
+            recognized = result.get('matches') or ([result] if result.get('matched') else [])
+            for match in recognized:
                 matches += 1
-                marked = client.mark(result, args.door_id, replay_demo=args.demo_replay)
+                marked = client.mark(match, args.door_id, replay_demo=args.demo_replay)
                 marks += int(marked.get('marked', False))
-                print(f"recognized person_id={result['person_id']} similarity={result['similarity']:.3f} marked={marked['marked']}", flush=True)
+                print(f"recognized person_id={match['person_id']} similarity={match['similarity']:.3f} marked={marked['marked']}", flush=True)
     except KeyboardInterrupt:
         print("\nDemo stopped.", flush=True)
     finally:
