@@ -18,7 +18,7 @@ uvicorn app.main:app --reload
 
 Put the YuNet, SFace, and MiniFASNetV2 ONNX weights in `app/vision/models/` before using recognition or enrollment. The backend returns a clear `503` when weights are absent; it never substitutes a different inference runtime or model.
 
-Run the dashboard from its directory with `npm install`, `BACKEND_URL=http://localhost:8000 API_TOKEN=change-me CAMERA_SOURCE_ID=door-camera LOCAL_CONTROL_ENABLED=true npm start`. The dashboard can use the browser camera directly, or receive frames from the on-premise camera client.
+Run the dashboard from its directory with `npm install`, `BACKEND_URL=http://localhost:8000 API_TOKEN=change-me CAMERA_SOURCE_ID=door-camera npm start`. The dashboard runs the bundled MP4 demo in the browser; a physical camera still uses the separate `door` client.
 
 ## Firebase dashboard authentication
 
@@ -82,7 +82,7 @@ uvicorn app.main:app --reload
 ```bash
 # Terminal 2
 cd dashboard
-BACKEND_URL=http://localhost:8000 API_TOKEN=change-me CAMERA_SOURCE_ID=door-camera LOCAL_CONTROL_ENABLED=true npm start
+BACKEND_URL=http://localhost:8000 API_TOKEN=change-me CAMERA_SOURCE_ID=door-camera npm start
 ```
 
 ```bash
@@ -105,7 +105,7 @@ alembic upgrade head
 python populate_profile_photos.py
 ```
 
-The themed dashboard also provides an **Add employee** form. It creates the employee, uploads an optional profile photo, and enrolls one or more face images through the existing protected people API. The live camera panel overlays green boxes for recognized employees and red boxes for unknown faces, and the Overview page counts distinct unknown-person appearances as **Intruders detected**. The counter is in-memory and resets when the backend restarts. On the Overview page, **Open camera** requests camera permission from the browser and sends frames securely through the dashboard to the backend. **Run video demo** plays the bundled ChokePoint MP4 in the browser and sends its frames through the explicit replay-demo endpoint. Set `DEMO_REPLAY_ENABLED=true` before starting the backend for the browser demo. Browser camera access requires HTTPS or `localhost`; Railway provides HTTPS automatically.
+The themed dashboard also provides an **Add employee** form. It creates the employee, uploads an optional profile photo, and enrolls one or more face images through the existing protected people API. **Run video demo** plays the bundled ChokePoint MP4 in the browser, sends its frames through the explicit replay-demo endpoint, and draws green boxes for recognized employees or red boxes for unknown faces. The Overview page counts distinct unknown-person appearances as **Intruders detected**. Set `DEMO_REPLAY_ENABLED=true` before starting the backend for the demo.
 
 For a client presentation where the MP4 also creates visibly labeled demo rows, add `DEMO_REPLAY_ENABLED=true` to `.env`, restart the backend, and run:
 
@@ -119,7 +119,7 @@ python door/main.py \
   --demo-replay
 ```
 
-This explicit demo mode still runs YuNet and SFace against the enrolled database, but does not claim liveness or ambiguity protection. Rows appear as `demo_replay` and retain the measured liveness score, making the distinction visible in the dashboard. Never enable it for a production door. With the normal command, the prerecorded MP4 is correctly treated as a replay attack and should create no attendance rows. A real camera should use the normal command and requires three consecutive live matches before one `check_in` row is created.
+This explicit demo mode still runs YuNet and SFace against the enrolled database, bypasses liveness for the prerecorded input, and uses the best enrolled match because the synthetic subjects are visually similar. Rows appear as `demo_replay` and retain the measured liveness score, making the distinction visible in the dashboard. Never enable it for a production door. With the normal command, the prerecorded MP4 is correctly treated as a replay attack and should create no attendance rows. A real camera should use the normal command and retains the stricter ambiguity guard plus three consecutive live matches before one `check_in` row is created.
 
 This is a functional demonstration, not an unbiased accuracy score, because the same video supplies both enrollment frames and demo frames. For accuracy evaluation, compare predictions against the XML subject labels and exclude the enrollment frames recorded in `enrollment_manifest.json`.
 
@@ -151,7 +151,6 @@ Dashboard variables:
 BACKEND_URL=https://<backend-public-domain>
 API_TOKEN=<same backend secret>
 CAMERA_SOURCE_ID=door-camera
-LOCAL_CONTROL_ENABLED=false
 ```
 
-The browser camera and browser MP4 demo work on the hosted dashboard. `LOCAL_CONTROL_ENABLED` only controls the optional legacy buttons that launch a Python `door` process on the same machine as the dashboard; keep it `false` on Railway. For a separate physical camera device, run the `door` client on that device and point it at the Railway backend.
+The hosted dashboard only needs the MP4 demo and backend API. For a separate physical camera device, run the `door` client on that device and point it at the Railway backend.

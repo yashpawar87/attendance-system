@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://attendance:attendance@localhost:5432/attendance"
     recognition_threshold: float = Field(0.55, ge=-1, le=1)
     similarity_gap_threshold: float = Field(0.03, ge=0, le=1)
+    # The synthetic replay contains very similar faces. Keep the production
+    # ambiguity guard for live cameras, but allow the presentation demo to
+    # use the best enrolled match by default.
+    demo_similarity_gap_threshold: float = Field(0.0, ge=0, le=1)
     liveness_threshold: float = Field(0.70, ge=0, le=1)
     # MiniFASNetV2 exports three probabilities in this order:
     # live, print attack, replay attack.

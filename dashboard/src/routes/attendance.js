@@ -1,6 +1,4 @@
 import { Router } from 'express';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
 import { Readable } from 'node:stream';
 import { getAbsentees, getAttendance, getCameraMetrics, getPeople, getToday } from '../lib/apiClient.js';
 import multer from 'multer';
@@ -8,11 +6,6 @@ import { attendanceTable, renderAnalytics, renderAttendance, renderDashboard, re
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024, files: 20 } });
-let demoProcess = null;
-let demoState = { running: false, startedAt: null, lastOutput: '', exitCode: null };
-let cameraProcess = null;
-let cameraState = { running: false, startedAt: null, lastOutput: '', exitCode: null };
-
 function backendBaseUrl() {
   return (process.env.BACKEND_URL || 'http://localhost:8000').replace(/\/$/, '');
 }
@@ -20,36 +13,6 @@ function backendBaseUrl() {
 function backendHeaders() {
   return process.env.API_TOKEN ? { Authorization: `Bearer ${process.env.API_TOKEN}` } : {};
 }
-
-router.get('/camera/feed', async (req, res) => {
-  const backendUrl = (process.env.BACKEND_URL || 'http://localhost:8000').replace(/\/$/, '');
-  const token = process.env.API_TOKEN || '';
-  const sourceId = String(req.query.source || process.env.CAMERA_SOURCE_ID || 'door-camera');
-  const upstream = await fetch(`${backendUrl}/api/v1/camera/feed?source_id=${encodeURIComponent(sourceId)}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (!upstream.ok || !upstream.body) {
-    res.status(upstream.status || 502).send('Camera feed unavailable');
-    return;
-  }
-  res.status(200);
-  res.setHeader('Content-Type', upstream.headers.get('content-type') || 'multipart/x-mixed-replace; boundary=frame');
-  res.setHeader('Cache-Control', 'no-store');
-  Readable.fromWeb(upstream.body).pipe(res);
-});
-
-router.get('/camera/metrics', async (req, res) => {
-  const sourceId = String(req.query.source || process.env.CAMERA_SOURCE_ID || 'door-camera');
-  try {
-    const upstream = await fetch(`${backendBaseUrl()}/api/v1/camera/status?source_id=${encodeURIComponent(sourceId)}`, {
-      headers: backendHeaders(),
-    });
-    const body = await upstream.text();
-    res.status(upstream.status).type('application/json').send(body);
-  } catch (error) {
-    res.status(502).json({ detail: `Camera metrics unavailable: ${error.message}` });
-  }
-});
 
 router.get('/live/overview', async (req, res) => {
   try {
@@ -100,18 +63,33 @@ router.get('/demo/video', (req, res) => {
     .catch((error) => res.status(502).send(`Demo video unavailable: ${error.message}`));
 });
 
-async function processBrowserFrame(req, res, replayDemo = false) {
+router.get('/camera/feed', (req, res) => {
+  const sourceId = req.query.source || 'demo-replay';
+  fetch(`${backendBaseUrl()}/api/v1/camera/feed?source_id=${encodeURIComponent(sourceId)}`, { headers: backendHeaders() })
+    .then(async (upstream) => {
+      if (!upstream.ok || !upstream.body) {
+        res.status(upstream.status || 502).send(await upstream.text());
+        return;
+      }
+      res.status(200);
+      res.setHeader('Content-Type', upstream.headers.get('content-type') || 'multipart/x-mixed-replace; boundary=frame');
+      res.setHeader('Cache-Control', 'no-store');
+      Readable.fromWeb(upstream.body).pipe(res);
+    })
+    .catch((error) => res.status(502).send(`Camera feed unavailable: ${error.message}`));
+});
+
+async function processDemoFrame(req, res) {
   const file = req.file;
   if (!file) {
-    res.status(400).json({ detail: 'A camera frame is required.' });
+    res.status(400).json({ detail: 'A demo video frame is required.' });
     return;
   }
   const sourceId = String(req.body.source_id || process.env.CAMERA_SOURCE_ID || 'door-camera');
   const recognitionForm = new FormData();
-  recognitionForm.append('image', new Blob([file.buffer], { type: file.mimetype || 'image/jpeg' }), file.originalname || 'browser-frame.jpg');
+  recognitionForm.append('image', new Blob([file.buffer], { type: file.mimetype || 'image/jpeg' }), file.originalname || 'demo-frame.jpg');
   recognitionForm.append('source_id', sourceId);
-  const recognitionPath = replayDemo ? '/api/v1/recognition/demo-identify' : '/api/v1/recognition/identify';
-  const recognitionResponse = await fetch(`${backendBaseUrl()}${recognitionPath}`, {
+  const recognitionResponse = await fetch(`${backendBaseUrl()}/api/v1/recognition/demo-identify`, {
     method: 'POST',
     headers: backendHeaders(),
     body: recognitionForm,
@@ -124,7 +102,7 @@ async function processBrowserFrame(req, res, replayDemo = false) {
   const result = JSON.parse(recognitionText);
   let attendance = null;
   if (result.matched) {
-    const attendanceResponse = await fetch(`${backendBaseUrl()}/api/v1/attendance/${replayDemo ? 'demo-mark' : 'mark'}`, {
+    const attendanceResponse = await fetch(`${backendBaseUrl()}/api/v1/attendance/demo-mark`, {
       method: 'POST',
       headers: { ...backendHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -143,17 +121,9 @@ async function processBrowserFrame(req, res, replayDemo = false) {
   res.json({ ...result, attendance_marked: Boolean(attendance?.marked), attendance });
 }
 
-router.post('/browser/identify', upload.single('image'), async (req, res) => {
-  try {
-    await processBrowserFrame(req, res);
-  } catch (error) {
-    res.status(502).json({ detail: `Browser recognition unavailable: ${error.message}` });
-  }
-});
-
 router.post('/browser/demo-identify', upload.single('image'), async (req, res) => {
   try {
-    await processBrowserFrame(req, res, true);
+    await processDemoFrame(req, res);
   } catch (error) {
     res.status(502).json({ detail: `Browser demo unavailable: ${error.message}` });
   }
@@ -257,98 +227,6 @@ router.get('/analytics', async (req, res) => {
 
 router.get('/settings', (req, res) => {
   res.send(renderSettings());
-});
-
-router.get('/demo/status', (req, res) => {
-  res.json({ ...demoState, pid: demoProcess?.pid || null });
-});
-
-router.post('/demo/start', (req, res) => {
-  if (process.env.LOCAL_CONTROL_ENABLED !== 'true') {
-    res.status(403).json({ detail: 'Local demo controls are disabled for this dashboard deployment.' });
-    return;
-  }
-  if (cameraProcess && cameraState.running) {
-    res.status(409).json({ detail: 'Stop the physical camera before starting the video demo.' });
-    return;
-  }
-  if (demoProcess && demoState.running) {
-    res.json({ ...demoState, pid: demoProcess.pid });
-    return;
-  }
-  const projectRoot = process.env.PROJECT_ROOT || path.resolve(process.cwd(), '..');
-  const pythonPath = process.env.PYTHON_BIN || path.join(projectRoot, '.venv', 'bin', 'python');
-  const videoPath = process.env.DEMO_VIDEO || path.join(projectRoot, 'create_syn_data', 'P1E_S1_C1', 'chokepoint_P1E_S1_C1.mp4');
-  demoState = { running: true, startedAt: new Date().toISOString(), lastOutput: '', exitCode: null };
-  demoProcess = spawn(pythonPath, [
-    'door/main.py', '--video', videoPath, '--api-url', backendBaseUrl(), '--token', process.env.API_TOKEN || 'change-me',
-    '--source-id', process.env.CAMERA_SOURCE_ID || 'door-camera', '--sample-fps', process.env.DEMO_SAMPLE_FPS || '5', '--demo-replay',
-  ], { cwd: projectRoot, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
-  const collect = (chunk) => {
-    demoState.lastOutput = `${demoState.lastOutput}${chunk.toString()}`.slice(-2000);
-  };
-  demoProcess.stdout.on('data', collect);
-  demoProcess.stderr.on('data', collect);
-  demoProcess.on('close', (code) => {
-    demoState = { ...demoState, running: false, exitCode: code };
-    demoProcess = null;
-  });
-  demoProcess.on('error', (error) => {
-    demoState = { ...demoState, running: false, exitCode: -1, lastOutput: `${demoState.lastOutput}${error.message}` };
-    demoProcess = null;
-  });
-  res.status(202).json({ ...demoState, pid: demoProcess.pid });
-});
-
-router.post('/demo/stop', (req, res) => {
-  if (demoProcess) demoProcess.kill('SIGTERM');
-  res.json({ stopped: true });
-});
-
-router.get('/camera/status', (req, res) => {
-  res.json({ ...cameraState, pid: cameraProcess?.pid || null });
-});
-
-router.post('/camera/start', (req, res) => {
-  if (process.env.LOCAL_CONTROL_ENABLED !== 'true') {
-    res.status(403).json({ detail: 'Local camera controls are disabled for this dashboard deployment.' });
-    return;
-  }
-  if (demoProcess && demoState.running) {
-    res.status(409).json({ detail: 'Stop the video demo before opening the physical camera.' });
-    return;
-  }
-  if (cameraProcess && cameraState.running) {
-    res.json({ ...cameraState, pid: cameraProcess.pid });
-    return;
-  }
-  const projectRoot = process.env.PROJECT_ROOT || path.resolve(process.cwd(), '..');
-  const pythonPath = process.env.PYTHON_BIN || path.join(projectRoot, '.venv', 'bin', 'python');
-  cameraState = { running: true, startedAt: new Date().toISOString(), lastOutput: '', exitCode: null };
-  cameraProcess = spawn(pythonPath, [
-    'door/main.py', '--api-url', backendBaseUrl(), '--token', process.env.API_TOKEN || 'change-me',
-    '--camera-index', process.env.CAMERA_INDEX || '0', '--source-id', process.env.CAMERA_SOURCE_ID || 'door-camera',
-    '--sample-fps', process.env.CAMERA_SAMPLE_FPS || '5',
-  ], { cwd: projectRoot, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
-  const collect = (chunk) => {
-    cameraState.lastOutput = `${cameraState.lastOutput}${chunk.toString()}`.slice(-2000);
-  };
-  cameraProcess.stdout.on('data', collect);
-  cameraProcess.stderr.on('data', collect);
-  cameraProcess.on('close', (code) => {
-    cameraState = { ...cameraState, running: false, exitCode: code };
-    cameraProcess = null;
-  });
-  cameraProcess.on('error', (error) => {
-    cameraState = { ...cameraState, running: false, exitCode: -1, lastOutput: `${cameraState.lastOutput}${error.message}` };
-    cameraProcess = null;
-  });
-  res.status(202).json({ ...cameraState, pid: cameraProcess.pid });
-});
-
-router.post('/camera/stop', (req, res) => {
-  if (cameraProcess) cameraProcess.kill('SIGTERM');
-  res.json({ stopped: true });
 });
 
 router.get('/search', async (req, res) => {

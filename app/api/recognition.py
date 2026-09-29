@@ -8,6 +8,26 @@ from app.vision.overlay import draw_face_overlays
 router = APIRouter(prefix="/api/v1/recognition", tags=["recognition"], dependencies=[Depends(require_api_token)])
 
 
+def _identify_response(result, observations):
+    from app.api.schemas import FaceDetectionResponse
+
+    detections = [FaceDetectionResponse(
+        box=tuple(float(value) for value in observation.box),
+        matched=observation.matched,
+        person_id=observation.person_id,
+        similarity=observation.similarity,
+    ) for observation in observations]
+    if result is None:
+        return IdentifyResponse(matched=False, detections=detections)
+    return IdentifyResponse(
+        matched=True,
+        person_id=result.person_id,
+        similarity=result.similarity,
+        liveness=result.liveness,
+        detections=detections,
+    )
+
+
 async def _decode_upload(image: UploadFile):
     import cv2
     import numpy as np
@@ -35,9 +55,7 @@ async def identify(
     encoded_ok, encoded = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
     if encoded_ok:
         request.app.state.camera_store.publish(source_id, encoded.tobytes())
-    if result is None:
-        return IdentifyResponse(matched=False)
-    return IdentifyResponse(matched=True, person_id=result.person_id, similarity=result.similarity, liveness=result.liveness)
+    return _identify_response(result, observations)
 
 
 @router.post("/demo-identify", response_model=IdentifyResponse)
@@ -57,6 +75,4 @@ async def demo_identify(
     encoded_ok, encoded = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
     if encoded_ok:
         request.app.state.camera_store.publish(source_id, encoded.tobytes())
-    if result is None:
-        return IdentifyResponse(matched=False)
-    return IdentifyResponse(matched=True, person_id=result.person_id, similarity=result.similarity, liveness=result.liveness)
+    return _identify_response(result, observations)

@@ -33,11 +33,16 @@ class RecognitionService:
         *,
         demo_replay: bool = False,
     ) -> tuple[RecognitionResult | None, list[FaceObservation]]:
+        gap_threshold = self.settings.demo_similarity_gap_threshold if demo_replay else self.settings.similarity_gap_threshold
         observations = self.pipeline.inspect(
             image,
             self.matcher_factory(),
             enforce_liveness=not demo_replay,
-            enforce_gap=not demo_replay,
+            # Replay mode is an explicit presentation flow. Its synthetic
+            # subjects are visually similar, so use the configured demo gap
+            # (zero by default) while keeping the stricter live-camera gap.
+            enforce_gap=gap_threshold > 0,
+            similarity_gap_threshold=gap_threshold,
         )
         accepted = [observation for observation in observations if observation.matched and observation.person_id is not None]
         result = None

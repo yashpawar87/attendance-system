@@ -113,3 +113,18 @@ def test_pipeline_deduplicates_overlapping_observations_for_one_person():
     unique = RecognitionPipeline._deduplicate_observations(observations)
     assert [observation.person_id for observation in unique] == [7, 8]
     assert unique[0].similarity == .91
+
+
+def test_demo_replay_rejects_ambiguous_identity_instead_of_picking_wrong_employee():
+    class AmbiguousMatcher:
+        def match(self, embedding):
+            return MatchCandidate(7, .91), MatchCandidate(8, .90)
+
+    settings = Settings(temporal_match_count=1, similarity_gap_threshold=.03, demo_similarity_gap_threshold=.03)
+    pipeline = RecognitionPipeline(FakeDetector(), FakeLiveness(), FakeEmbedder(), settings)
+    service = RecognitionService(pipeline, lambda: AmbiguousMatcher(), settings)
+    frame = np.zeros((120, 120, 3), dtype=np.uint8)
+    result, observations = service.identify_with_observations(frame, source_id="ambiguous-demo", demo_replay=True)
+    assert result is None
+    assert observations[0].matched is False
+    assert observations[0].person_id is None

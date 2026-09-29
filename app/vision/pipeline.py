@@ -37,8 +37,15 @@ class RecognitionPipeline:
         *,
         enforce_liveness: bool = True,
         enforce_gap: bool = True,
+        similarity_gap_threshold: float | None = None,
     ) -> RecognitionResult | None:
-        observations = self.inspect(image, matcher, enforce_liveness=enforce_liveness, enforce_gap=enforce_gap)
+        observations = self.inspect(
+            image,
+            matcher,
+            enforce_liveness=enforce_liveness,
+            enforce_gap=enforce_gap,
+            similarity_gap_threshold=similarity_gap_threshold,
+        )
         accepted = [observation for observation in observations if observation.matched]
         if not accepted:
             return None
@@ -52,7 +59,9 @@ class RecognitionPipeline:
         *,
         enforce_liveness: bool = True,
         enforce_gap: bool = True,
+        similarity_gap_threshold: float | None = None,
     ) -> list[FaceObservation]:
+        gap_threshold = self.settings.similarity_gap_threshold if similarity_gap_threshold is None else similarity_gap_threshold
         faces = self.detector.detect_all(image) if hasattr(self.detector, "detect_all") else [self.detector.detect(image)]
         observations: list[FaceObservation] = []
         for detected in faces:
@@ -67,7 +76,7 @@ class RecognitionPipeline:
             best, second = matcher.match(embedding)
             similarity = best.similarity if best else None
             matched = best is not None and best.similarity >= self.settings.recognition_threshold
-            if matched and enforce_gap and second is not None and best.similarity - second.similarity < self.settings.similarity_gap_threshold:
+            if matched and enforce_gap and second is not None and best.similarity - second.similarity < gap_threshold:
                 matched = False
             observations.append(
                 FaceObservation(
